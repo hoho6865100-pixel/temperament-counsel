@@ -774,10 +774,12 @@ TCI(자극추구·위험회피·사회적 민감성·인내력, 자율성·연�
  - meaning_high / meaning_low: 결과지에 적힌 뜻이 있으면 그대로, 없으면 null.
 2) scale: {name, min, max, low_below, high_above} — 결과지에 판정 기준 점수가 적혀 있을 때만 low_below/high_above, 없으면 null.
 3) people: 결과지에 점수가 나오는 사람을 한 명도 빠뜨리지 말고 모두 넣으세요. 특히 '기질 프로파일 비교'처럼 아이와 양육자(엄마·아빠)의 점수가 한 표·그래프에 함께 있으면 아이와 각 양육자를 각각 따로 넣어야 합니다. 표의 열·행 제목, 범례(선 색·기호 이름)를 모두 확인하세요.
- role: 그 점수가 누구의 기질인가. 아버지/아빠/부/부친/父 → "dad", 어머니/엄마/모/모친/母 → "mom", 유아/아동/자녀/영아/개월 → "child". 결과지가 '양육자'·'부모'라고만 쓰고 그 양육자의 관계나 성별(아버지·남)이 결과지 다른 곳(양육자 정보, 응답자 정보 등)에 적혀 있으면 그것을 따르세요. 부모가 아이에 대해 응답한 아이 검사는 child(응답자는 reporter). 끝까지 근거가 없으면 "unknown"(사람은 빼지 말고 unknown으로 넣기). role 값은 반드시 child, mom, dad, unknown 중 하나. role_evidence에 근거 문구 인용.
+ role: 그 점수가 누구의 기질인가. 아버지/아빠/부/부친/父 → "dad", 어머니/엄마/모/모친/母 → "mom", 유아/아동/자녀/영아/개월 → "child". 결과지가 '양육자'·'부모'라고만 쓰고 그 양육자의 관계나 성별(아버지·남)이 결과지 다른 곳(양육자 정보, 응답자 정보 등)에 적혀 있으면 그것을 따르세요. 부모가 아이에 대해 응답한 아이 검사는 child(응답자는 reporter). '아빠'·'아버지'·'엄마'·'어머니'처럼 관계를 풀어 쓴 말이 있으면, 괄호 속 한 글자 표기((모)·(부))나 양식 번호보다 풀어 쓴 말을 우선해 role을 정하세요(둘이 다르면 풀어 쓴 말을 따르고 warnings에 한 줄로 알림). 끝까지 근거가 없으면 "unknown"(사람은 빼지 말고 unknown으로 넣기). role 값은 반드시 child, mom, dad, unknown 중 하나. role_evidence에 근거 문구 인용.
 4) 각 사람 factors: factor_defs의 name을 키로 {"score":숫자 또는 null,"level":"결과지에 표시된 판정 글자 그대로(예: 낮음, 보통, 높음, 매우 높음). 표의 판정 칸, 체크(✓·●) 표시된 칸의 이름, 그래프 구간 이름까지 확인해 요인마다 빠짐없이 찾고, 정말 없을 때만 null","original":"결과지 표기 그대로","sheet_text":"이 요인 해석 문장 그대로 또는 null"}. score는 결과지 숫자 그대로(환산 금지). 그래프에서만 읽을 수 있으면 읽은 값과 original에 '그래프에서 읽음'.
 5) sheet_interpretation: 그 사람에 대한 결과지 종합 해석 문장 그대로 최대 5개.
 7) child: name, sex("남"|"여"|null), age_months(검사 당시 월령 정수, 없으면 생년월일과 검사일로 만 개월 계산, 없으면 null), evidence.
+
+warnings는 상담하는 원장이 읽는 쉬운 한국어 문장으로 꼭 알려야 할 것만 최대 2개 쓰세요. role·null·age_months 같은 필드 이름이나 영어 단어는 쓰지 마세요. 결과지에 원래 없는 항목(생년월일·기준 점수 등)이 비어 있는 것은 warnings에 쓰지 마세요.
 
 이 JSON 하나로만 답하세요:
 {"test_name":"","factor_defs":[{"name":"활동성","match_key":"act","meaning_high":null,"meaning_low":null}],
@@ -893,6 +895,8 @@ async function processFile(file){
       if(!Object.keys(entries).length)return;
       const item={file:file.name,name:pp.name||null,evidence:pp.role_evidence||"",reporter:pp.reporter||null,entries,interp:(pp.sheet_interpretation||[]).map(String)};
       let role=normRole(pp.role);
+      if(!role&&pp.role!=="child"){const ev=String(pp.role_evidence||"")+" "+String(pp.reporter||"");const d=/아빠|아버지|부친/.test(ev),m=/엄마|어머니|모친/.test(ev);
+        if(d!==m){role=d?"dad":"mom";item.evidence=(item.evidence?item.evidence+" · ":"")+`결과지에 적힌 ‘${d?"아빠":"엄마"}’ 표기를 따랐어요. 맞는지 확인해 주세요`}}
       if(role&&used[role]){role=null;item.evidence=(item.evidence?item.evidence+" · ":"")+"같은 결과지에 같은 역할이 두 번 나와 확인이 필요해요"}
       if(!role){S.pending.push(item);out.push("누구 결과인지 확인이 필요한 점수가 있어요 — 아래 ‘확인 필요’에서 골라 주세요");return}
       used[role]=1;applyPerson(role,item);out.push(`${R[role].n} 결과로 정리`);
@@ -900,7 +904,7 @@ async function processFile(file){
     S.sample=false;S.fresh=false;save();renderCrit();renderPending();renderPeople();renderInfo();renderGList();renderAll();
     const bad=!out.length||out.some(x=>x.startsWith("누구"));
     st.textContent=!out.length?"점수를 못 찾음":bad?"확인 필요":"정리 완료";st.className="status "+(bad?"err":"ok");
-    msg.textContent=[...new Set(out)].concat((res.warnings||[]).slice(0,3)).join(" · ")||"정리표에 직접 입력해 주세요.";
+    msg.textContent=[...new Set(out)].concat((res.warnings||[]).map(String).filter(w=>!/[A-Za-z_]{4,}|null/.test(w)||/AI/.test(w)).slice(0,3)).join(" · ")||"정리표에 직접 입력해 주세요.";
   }catch(e){st.textContent="읽지 못함";st.className="status err";msg.textContent=e.message||""}
 }
 
