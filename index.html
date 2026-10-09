@@ -708,18 +708,26 @@ function serverSample(){
   const call=async(prompt,opts={})=>{
     const images=opts.images?await Promise.all([].concat(opts.images).slice(0,8).map(toJpeg)):[];
     for(let attempt=0;attempt<4;attempt++){
-      let r;try{r=await fetch("/api/claude",{method:"POST",signal:opts.signal,headers:{"content-type":"application/json","x-access-code":encodeURIComponent(getCode())},body:JSON.stringify({prompt,images})})}
+      let r;try{r=await fetch("/api/claude",{method:"POST",signal:opts.signal,headers:{"content-type":"application/json","x-access-code":encodeURIComponent(getCode())},body:JSON.stringify({prompt,images,stream:true})})}
       catch(e){throw{code:e&&e.name==="AbortError"?"cancelled":"upstream_error"}}
       if(r.status===401){if(attempt===3)break;const c=window.prompt(attempt===0&&!getCode()?"AI 분석 접근 코드를 입력해 주세요":"접근 코드가 맞지 않아요. Vercel의 ACCESS_CODE 값과 똑같이 다시 입력해 주세요 (대소문자 구분)");if(!c)throw{code:"not_granted"};setCode(c.trim());continue}
       if(r.status===503||r.status===404)throw{code:"sampling_disabled"};
       if(r.status===429)throw{code:"rate_limited"};
       if(!r.ok){let d="";try{const j=await r.json();d=[j.error,j.detail].filter(Boolean).join(": ")}catch(e){}throw{code:"upstream_error",detail:d.slice(0,160)}}
-      return await r.json();
+      if(!(r.headers.get("content-type")||"").includes("text/plain"))return await r.json();
+      const rd=r.body.getReader(),dec=new TextDecoder();let text="";
+      try{for(;;){const {done,value}=await rd.read();if(done)break;text+=dec.decode(value,{stream:true});
+        const k=text.indexOf("\u0000");if(opts.onText)opts.onText({text:k>=0?text.slice(0,k):text})}}
+      catch(e){throw{code:e&&e.name==="AbortError"?"cancelled":"upstream_error",detail:"연결이 끊겼어요"}}
+      const k=text.indexOf("\u0000");
+      if(k>=0){const tail=text.slice(k+1);text=text.slice(0,k);if(tail.startsWith("ERR:"))throw{code:/rate/i.test(tail)?"rate_limited":"upstream_error",detail:tail.slice(4,164)};
+        return{text,truncated:tail.startsWith("TRUNC")}}
+      return{text,truncated:false};
     }
     setCode("");throw{code:"bad_code"};
   };
-  const fn=async(prompt,opts)=>{const j=await call(prompt,opts);if(opts&&opts.onText)opts.onText({text:j.text,delta:j.text});return{text:j.text,truncated:!!j.truncated}};
-  fn.json=async(prompt,opts)=>{const j=await call(prompt,opts);return parse(j.text||"")};
+  const fn=async(prompt,opts={})=>{const j=await call(prompt,opts);return{text:j.text,truncated:!!j.truncated}};
+  fn.json=async(prompt,opts={})=>{const j=await call(prompt,opts);if(j.truncated)throw{code:"invalid_json"};return parse(j.text||"")};
   fn.limits=async()=>({maxPromptBytes:262144,images:{maxCount:8}});
   return fn;
 }
@@ -921,7 +929,21 @@ function roleList(){
   return out.sort((a,b)=>((b[b.far].gap??0)-(a[a.far].gap??0)));
 }
 function childSignals(){return FOCUS.map(f=>{const hits=f.keys.filter(([k,l])=>{const d=F().find(x=>x.key===k);return d&&lv("child",d.id)===l}).map(([k])=>F().find(x=>x.key===k));return{f,hits}}).filter(x=>x.hits.length).sort((a,b)=>b.hits.length-a.hits.length)}
-function analysisPrompt(){
+const ANA_PARTS=["p1","p2","p3"];
+const anaPart=()=>{const c=cName(),bl=bandLabel()||"연령";return{
+ p1:`이번 답에서는 아래 두 항목만 쓰세요. 이 JSON 하나로만 답하세요(키 이름 그대로):
+{"persons":{"child":{"headline":"25자 이내","keywords":["3~5개, 각 8자 이내"],"summary":"4~5문장","strengths":["2~3개"],"care":["2개"]},"mom":{...},"dad":{...}},
+ "age_overview":{"title":"${bl} 발달 특성과 ${c}의 기질","points":[{"dev":"연령 발달 특성 1문장","link":"이 아이 기질과 연결한 의미와 대처 1~2문장"}]}}
+- persons는 결과가 있는 사람만, keywords는 두드러진 요인에서만. age_overview.points 3~4개.`,
+ p2:`이번 답에서는 아래 두 항목만 쓰세요. 이 JSON 하나로만 답하세요(키 이름 그대로):
+{"focus_areas":[{"title":"지도 영역 이름","priority":"높음|보통","factors":["관련 요인"],"basis":"근거: 두드러진 요인 점수와 연령 특성 1~2문장","concern":"예상되는 모습 1~2문장","goal":"지도 목표 1문장","home":["가정에서 할 일 2~3개"],"center":["기관에서 할 일 1~2개"],"check":"2~4주 뒤 확인할 변화 1문장"}],
+ "principles":[{"title":"아이 양육 원칙 한 줄","factors":["관련 요인"],"how":["구체적 행동 2개"]}]}
+- focus_areas 1~4개(우선순위 순), principles 3~5개.`,
+ p3:`이번 답에서는 아래 두 항목만 쓰세요. 이 JSON 하나로만 답하세요(키 이름 그대로):
+{"guide":{"mom":{"diff":[{"factor":"요인 이름 그대로","title":"핵심 한 줄(20자 이내)","scene":"구체적 장면 1문장","how":["구체적 행동 2~3개"],"why":"두 사람의 점수와 기질 근거 1문장"}],"same":[]},"dad":{...}},
+ "roles":[{"factor":"요인 이름","empathy":"공감 담당이 할 일 1문장","expand":"넓혀 주기 담당이 할 일 1문장"}]}
+- guide는 결과가 있는 양육자만. diff에는 '아이와_점수차이가_큰_요인'을 그 순서대로 모두 넣고 same은 빈 배열. 차이가 큰 요인이 없으면 diff도 빈 배열. roles는 '역할나누기_대상'의 요인만(없으면 빈 배열).`}};
+function analysisPrompt(part){
   const data={검사:S.testName||"영유아 기질검사",아이:{이름:cName(),성별:S.info.sex||"모름",연령:bandLabel()||"모름",월령:S.info.age||null},
     해석기준:{설명:`높음·낮음으로 평정하지 않습니다. 중간값 ${S.crit.med}에서 표준편차 ${S.crit.sd} 이상 벗어난 요인만 '두드러진 요인'이며, 나머지는 중간값 부근이라 해석하지 않습니다. 아이와 양육자의 점수 차이 ${S.crit.big} 이상인 요인만 관계 해석 대상입니다.`},
     요인:F().map(d=>({이름:d.n,높을때:d.mHi||(libOf(d)?libOf(d).dHi:null),낮을때:d.mLo||(libOf(d)?libOf(d).dLo:null)})),
@@ -944,15 +966,7 @@ function analysisPrompt(){
 - 성별은 연구로 확인된 평균적 경향이 실제로 관련 있을 때만 조심스럽게 참고하고, 고정관념 표현(남자아이니까 등)은 쓰지 마세요. 관련 없으면 언급하지 마세요.
 - 아이 이름은 '${cName()}', 양육자는 '엄마'·'아빠'.
 
-이 JSON 하나로만 답하세요(키 이름 그대로):
-{"persons":{"child":{"headline":"25자 이내","keywords":["3~5개, 각 8자 이내"],"summary":"4~5문장","strengths":["2~3개"],"care":["2개"]},"mom":{...},"dad":{...}},
- "age_overview":{"title":"${bandLabel()||"연령"} 발달 특성과 ${cName()}의 기질","points":[{"dev":"연령 발달 특성 1문장","link":"이 아이 기질과 연결한 의미와 대처 1~2문장"}]},
- "focus_areas":[{"title":"지도 영역 이름","priority":"높음|보통","factors":["관련 요인"],"basis":"근거: 두드러진 요인 점수와 연령 특성 1~2문장","concern":"예상되는 모습 1~2문장","goal":"지도 목표 1문장","home":["가정에서 할 일 2~3개"],"center":["기관에서 할 일 1~2개"],"check":"2~4주 뒤 확인할 변화 1문장"}],
- "guide":{"mom":{"diff":[{"factor":"요인 이름 그대로","title":"핵심 한 줄(20자 이내)","scene":"구체적 장면 1문장","how":["구체적 행동 2~3개"],"why":"두 사람의 점수와 기질 근거 1문장"}],"same":[]},"dad":{...}},
- "roles":[{"factor":"요인 이름","empathy":"공감 담당이 할 일 1문장","expand":"넓혀 주기 담당이 할 일 1문장"}],
- "principles":[{"title":"아이 양육 원칙 한 줄","factors":["관련 요인"],"how":["구체적 행동 2개"]}]}
-- persons는 결과가 있는 사람만, keywords는 두드러진 요인에서만. guide의 diff에는 '아이와_점수차이가_큰_요인'을 그 순서대로 모두 넣고 same은 빈 배열로 두세요. 차이가 큰 요인이 없으면 diff도 빈 배열.
-- age_overview.points 3~4개, focus_areas 1~4개(우선순위 순), roles는 '역할나누기_대상'의 요인만, principles 3~5개.
+${anaPart()[part]}
 
 검사 결과:
 ${JSON.stringify(data,null,1)}`;
@@ -963,13 +977,23 @@ async function analyzeNow(){
   if(analyzing)return;
   analyzing=new AbortController();
   document.querySelectorAll("[data-analyze]").forEach(b=>{b.disabled=true;b.textContent="작성 중…"});
-  const st=()=>document.querySelectorAll(".anaStatus");st().forEach(s=>s.textContent="결과를 분석해 상담 자료를 작성하고 있어요. 1~2분 걸려요.");
+  const st=()=>document.querySelectorAll(".anaStatus");st().forEach(s=>s.textContent="결과를 분석해 상담 자료를 작성하고 있어요. 보통 1분 안팎 걸려요.");
   try{
-    const b=basis();
-    const data=await sampleFn.json(analysisPrompt(),{modelTier:"complex",signal:analyzing.signal,onText:({text})=>st().forEach(s=>s.textContent=`작성 중… (${text.length}자)`)});
-    if(!data||!data.persons)throw{code:"invalid_json"};
-    S.analysis={basis:b,data,at:new Date().toISOString().slice(0,16).replace("T"," ")};save();analyzing=null;renderAll();toast("기질 분석을 작성했어요");
-  }catch(e){analyzing=null;renderAnaBar();st().forEach(s=>s.textContent=e.code==="not_granted"?"분석 작성이 허용되지 않았어요.":e.code==="rate_limited"?"요청이 많아요. 잠시 후 다시 눌러 주세요.":"작성하지 못했어요. 다시 눌러 주세요.")}
+    const b=basis(),len={p1:0,p2:0,p3:0},done={};
+    const prog=()=>st().forEach(s=>s.textContent=`작성 중… ${Object.keys(done).length}/3 완료 (${Object.values(len).reduce((x,y)=>x+y,0)}자)`);
+    const run=async(part,tries=2)=>{for(let t=0;t<tries;t++){try{
+        const r=await sampleFn.json(analysisPrompt(part),{modelTier:"complex",signal:analyzing.signal,onText:({text})=>{len[part]=text.length;prog()}});
+        if(r&&typeof r==="object"){done[part]=1;prog();return r}}catch(e){if(e&&(e.code==="cancelled"||e.code==="not_granted"||e.code==="rate_limited")||t===tries-1)throw e}}
+      throw{code:"invalid_json"}};
+    const res=await Promise.allSettled(ANA_PARTS.map(p=>run(p)));
+    const val=i=>res[i].status==="fulfilled"?res[i].value:{};
+    if(res[0].status!=="fulfilled")throw res[0].reason||{code:"invalid_json"};
+    const data={persons:{},age_overview:null,focus_areas:[],principles:[],guide:{},roles:[],...val(0),...val(1),...val(2)};
+    if(!data.persons||!Object.keys(data.persons).length)throw{code:"invalid_json"};
+    const miss=res.filter(x=>x.status!=="fulfilled").length;
+    S.analysis={basis:b,data,at:new Date().toISOString().slice(0,16).replace("T"," ")};save();analyzing=null;renderAll();
+    toast(miss?"기질 분석을 작성했어요. 일부 항목은 기본 해석으로 보여요":"기질 분석을 작성했어요");
+  }catch(e){analyzing=null;renderAnaBar();st().forEach(s=>s.textContent=e.code==="not_granted"?"분석 작성이 허용되지 않았어요.":e.code==="rate_limited"?"요청이 많아요. 잠시 후 다시 눌러 주세요.":e.code==="upstream_error"&&e.detail?`작성하지 못했어요 (${e.detail}). 다시 눌러 주세요.`:"작성하지 못했어요. 다시 눌러 주세요.")}
 }
 let EDIT=false;
 function setPath(obj,path,v){const ks=path.split(".");let o=obj;for(let i=0;i<ks.length-1;i++){o=o[ks[i]];if(o==null)return}o[ks[ks.length-1]]=v}
