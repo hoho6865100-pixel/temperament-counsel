@@ -14,7 +14,7 @@ async function pickModel(key) {
   } catch (e) { return null; }
 }
 
-function callClaude(key, model, prompt, images, stream, json) {
+function callClaude(key, model, prompt, images, stream, json, toolMode) {
   const content = (images || []).slice(0, 8).map(data => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } }));
   content.push({ type: "text", text: prompt });
   return fetch(`${API}/messages`, {
@@ -22,7 +22,7 @@ function callClaude(key, model, prompt, images, stream, json) {
     headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
     body: JSON.stringify(Object.assign({ model, max_tokens: 12000, stream: !!stream, messages: [{ role: "user", content }] },
       json ? { tools: [{ name: "answer", description: "요청한 JSON 형식 그대로 답을 제출합니다.", input_schema: { type: "object", additionalProperties: true } }],
-               tool_choice: { type: "tool", name: "answer" } } : {}))
+               tool_choice: toolMode === "auto" ? { type: "auto" } : { type: "tool", name: "answer" } } : {}))
   });
 }
 
@@ -38,12 +38,20 @@ module.exports = async (req, res) => {
   if (!prompt || typeof prompt !== "string" || prompt.length > 300000) return res.status(400).json({ error: "bad_request" });
   try {
     let model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
-    let r = await callClaude(key, model, prompt, images, stream, json);
+    const send = async (m) => {
+      let x = await callClaude(key, m, prompt, images, stream, json, "force");
+      if (json && x.status === 400) {
+        const t = await x.clone().text();
+        if (/tool/i.test(t)) x = await callClaude(key, m, prompt + "\n\n반드시 answer 도구로 답을 제출하세요.", images, stream, json, "auto");
+      }
+      return x;
+    };
+    let r = await send(model);
     if (r.status === 404 || r.status === 400) {
       const t = await r.text();
-      if (/model/i.test(t)) {
+      if (/model/i.test(t) && !/tool/i.test(t)) {
         const alt = await pickModel(key);
-        if (alt && alt !== model) { model = alt; r = await callClaude(key, model, prompt, images, stream, json); }
+        if (alt && alt !== model) { model = alt; r = await send(model); }
         else return res.status(502).json({ error: "model", detail: t.slice(0, 300) });
       } else return res.status(502).json({ error: "upstream", detail: t.slice(0, 300) });
     }
@@ -63,7 +71,7 @@ module.exports = async (req, res) => {
     res.setHeader("x-accel-buffering", "no");
     const reader = r.body.getReader();
     const dec = new TextDecoder();
-    let buf = "", stop = null, err = null;
+    let buf = "", stop = null, err = null, gotJson = false, textBuf = "";
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -73,12 +81,13 @@ module.exports = async (req, res) => {
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
         if (!line.startsWith("data:")) continue;
         let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
-        if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") { if (!json) res.write(ev.delta.text); }
-        else if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "input_json_delta") res.write(ev.delta.partial_json || "");
+        if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") { if (!json) res.write(ev.delta.text); else textBuf += ev.delta.text; }
+        else if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "input_json_delta") { gotJson = true; res.write(ev.delta.partial_json || ""); }
         else if (ev.type === "message_delta" && ev.delta) stop = ev.delta.stop_reason || stop;
         else if (ev.type === "error") err = (ev.error && (ev.error.type + ": " + ev.error.message)) || "stream error";
       }
     }
+    if (json && !gotJson && textBuf) res.write(textBuf);
     if (err) res.write("\u0000ERR:" + err);
     else if (stop === "max_tokens") res.write("\u0000TRUNC");
     return res.end();
