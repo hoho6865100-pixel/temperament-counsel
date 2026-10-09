@@ -27,7 +27,9 @@ module.exports = async (req, res) => {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return res.status(503).json({ error: "no_key" });
   const code = process.env.ACCESS_CODE;
-  if (code && req.headers["x-access-code"] !== code) return res.status(401).json({ error: "access_code" });
+  let sent = String(req.headers["x-access-code"] || "");
+  try { sent = decodeURIComponent(sent); } catch (e) {}
+  if (code && sent.trim() !== code.trim()) return res.status(401).json({ error: "access_code" });
   const { prompt, images } = req.body || {};
   if (!prompt || typeof prompt !== "string" || prompt.length > 300000) return res.status(400).json({ error: "bad_request" });
   try {
