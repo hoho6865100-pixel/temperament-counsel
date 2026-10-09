@@ -929,20 +929,23 @@ function roleList(){
   return out.sort((a,b)=>((b[b.far].gap??0)-(a[a.far].gap??0)));
 }
 function childSignals(){return FOCUS.map(f=>{const hits=f.keys.filter(([k,l])=>{const d=F().find(x=>x.key===k);return d&&lv("child",d.id)===l}).map(([k])=>F().find(x=>x.key===k));return{f,hits}}).filter(x=>x.hits.length).sort((a,b)=>b.hits.length-a.hits.length)}
-const ANA_PARTS=["p1","p2","p3"];
-const anaPart=()=>{const c=cName(),bl=bandLabel()||"연령";return{
- p1:`이번 답에서는 아래 두 항목만 쓰세요. 이 JSON 하나로만 답하세요(키 이름 그대로):
-{"persons":{"child":{"headline":"25자 이내","keywords":["3~5개, 각 8자 이내"],"summary":"4~5문장","strengths":["2~3개"],"care":["2개"]},"mom":{...},"dad":{...}},
+const anaPart=()=>{const c=cName(),bl=bandLabel()||"연령",pa=parents(),pn=pa.map(p=>`"${p}":{...}`).join(","),H='이번 답에서는 아래 항목만 쓰세요. 이 JSON 하나로만 답하세요(키 이름 그대로):\n';
+ const P={headline:"25자 이내",keywords:["3~5개, 각 8자 이내"],summary:"3~4문장",strengths:["2~3개"],care:["2개"]},PJ=JSON.stringify(P);
+ const parts={
+ child:H+`{"persons":{"child":${PJ}},
  "age_overview":{"title":"${bl} 발달 특성과 ${c}의 기질","points":[{"dev":"연령 발달 특성 1문장","link":"이 아이 기질과 연결한 의미와 대처 1~2문장"}]}}
-- persons는 결과가 있는 사람만, keywords는 두드러진 요인에서만. age_overview.points 3~4개.`,
- p2:`이번 답에서는 아래 두 항목만 쓰세요. 이 JSON 하나로만 답하세요(키 이름 그대로):
-{"focus_areas":[{"title":"지도 영역 이름","priority":"높음|보통","factors":["관련 요인"],"basis":"근거: 두드러진 요인 점수와 연령 특성 1~2문장","concern":"예상되는 모습 1~2문장","goal":"지도 목표 1문장","home":["가정에서 할 일 2~3개"],"center":["기관에서 할 일 1~2개"],"check":"2~4주 뒤 확인할 변화 1문장"}],
- "principles":[{"title":"아이 양육 원칙 한 줄","factors":["관련 요인"],"how":["구체적 행동 2개"]}]}
-- focus_areas 1~4개(우선순위 순), principles 3~5개.`,
- p3:`이번 답에서는 아래 두 항목만 쓰세요. 이 JSON 하나로만 답하세요(키 이름 그대로):
-{"guide":{"mom":{"diff":[{"factor":"요인 이름 그대로","title":"핵심 한 줄(20자 이내)","scene":"구체적 장면 1문장","how":["구체적 행동 2~3개"],"why":"두 사람의 점수와 기질 근거 1문장"}],"same":[]},"dad":{...}},
+- keywords는 두드러진 요인에서만. age_overview.points 3~4개.`,
+ focus:H+`{"focus_areas":[{"title":"지도 영역 이름","priority":"높음|보통","factors":["관련 요인"],"basis":"근거: 두드러진 요인 점수와 연령 특성 1~2문장","concern":"예상되는 모습 1~2문장","goal":"지도 목표 1문장","home":["가정에서 할 일 2~3개"],"center":["기관에서 할 일 1~2개"],"check":"2~4주 뒤 확인할 변화 1문장"}]}
+- focus_areas 1~3개(우선순위 순).`,
+ prin:H+`{"principles":[{"title":"아이 양육 원칙 한 줄","factors":["관련 요인"],"how":["구체적 행동 2개"]}],
  "roles":[{"factor":"요인 이름","empathy":"공감 담당이 할 일 1문장","expand":"넓혀 주기 담당이 할 일 1문장"}]}
-- guide는 결과가 있는 양육자만. diff에는 '아이와_점수차이가_큰_요인'을 그 순서대로 모두 넣고 same은 빈 배열. 차이가 큰 요인이 없으면 diff도 빈 배열. roles는 '역할나누기_대상'의 요인만(없으면 빈 배열).`}};
+- principles 3~4개. roles는 '역할나누기_대상'의 요인만(없으면 빈 배열).`};
+ if(pa.length){
+  parts.parents=H+`{"persons":{${pa.map(p=>`"${p}":${PJ}`).join(",")}}}
+- 양육자(${pa.map(p=>R[p].n).join("·")})만 쓰세요. keywords는 두드러진 요인에서만.`;
+  parts.guide=H+`{"guide":{${pa.map(p=>`"${p}":{"diff":[{"factor":"요인 이름 그대로","title":"핵심 한 줄(20자 이내)","scene":"구체적 장면 1문장","how":["구체적 행동 2~3개"],"why":"두 사람의 점수와 기질 근거 1문장"}],"same":[]}`).join(",")}}}
+- diff에는 '아이와_점수차이가_큰_요인'을 그 순서대로 모두 넣고 same은 빈 배열. 차이가 큰 요인이 없으면 diff도 빈 배열.`}
+ return parts};
 function analysisPrompt(part){
   const data={검사:S.testName||"영유아 기질검사",아이:{이름:cName(),성별:S.info.sex||"모름",연령:bandLabel()||"모름",월령:S.info.age||null},
     해석기준:{설명:`높음·낮음으로 평정하지 않습니다. 중간값 ${S.crit.med}에서 표준편차 ${S.crit.sd} 이상 벗어난 요인만 '두드러진 요인'이며, 나머지는 중간값 부근이라 해석하지 않습니다. 아이와 양육자의 점수 차이 ${S.crit.big} 이상인 요인만 관계 해석 대상입니다.`},
@@ -966,7 +969,7 @@ function analysisPrompt(part){
 - 성별은 연구로 확인된 평균적 경향이 실제로 관련 있을 때만 조심스럽게 참고하고, 고정관념 표현(남자아이니까 등)은 쓰지 마세요. 관련 없으면 언급하지 마세요.
 - 아이 이름은 '${cName()}', 양육자는 '엄마'·'아빠'.
 
-${anaPart()[part]}
+${typeof part==="string"?anaPart()[part]:part}
 
 검사 결과:
 ${JSON.stringify(data,null,1)}`;
@@ -977,19 +980,20 @@ async function analyzeNow(){
   if(analyzing)return;
   analyzing=new AbortController();
   document.querySelectorAll("[data-analyze]").forEach(b=>{b.disabled=true;b.textContent="작성 중…"});
-  const st=()=>document.querySelectorAll(".anaStatus");st().forEach(s=>s.textContent="결과를 분석해 상담 자료를 작성하고 있어요. 보통 1분 안팎 걸려요.");
+  const st=()=>document.querySelectorAll(".anaStatus");st().forEach(s=>s.textContent="결과를 분석해 상담 자료를 작성하고 있어요. 끝난 부분부터 바로 보여요.");
   try{
-    const b=basis(),len={p1:0,p2:0,p3:0},done={};
-    const prog=()=>st().forEach(s=>s.textContent=`작성 중… ${Object.keys(done).length}/3 완료 (${Object.values(len).reduce((x,y)=>x+y,0)}자)`);
+    const b=basis(),parts=anaPart(),keys=Object.keys(parts),len={},done={};
+    const prog=()=>st().forEach(s=>s.textContent=`작성 중… ${Object.keys(done).length}/${keys.length} 완료 (${Object.values(len).reduce((x,y)=>x+y,0)}자) · 끝난 부분부터 화면에 보여요`);
+    const data={persons:{},age_overview:null,focus_areas:[],principles:[],guide:{},roles:[]};
+    const merge=r=>{Object.entries(r||{}).forEach(([k,v])=>{if(k==="persons"||k==="guide")data[k]={...data[k],...(v||{})};else if(v!=null)data[k]=v});
+      if(basis()!==b||!data.persons.child)return;S.analysis={basis:b,data,at:new Date().toISOString().slice(0,16).replace("T"," ")};save();renderAll()};
     const run=async(part,tries=2)=>{for(let t=0;t<tries;t++){try{
         const r=await sampleFn.json(analysisPrompt(part),{modelTier:"complex",signal:analyzing.signal,onText:({text})=>{len[part]=text.length;prog()}});
-        if(r&&typeof r==="object"){done[part]=1;prog();return r}}catch(e){if(e&&(e.code==="cancelled"||e.code==="not_granted"||e.code==="rate_limited")||t===tries-1)throw e}}
+        if(r&&typeof r==="object"){done[part]=1;merge(r);prog();return r}}catch(e){if(e&&(e.code==="cancelled"||e.code==="not_granted"||e.code==="rate_limited")||t===tries-1)throw e}}
       throw{code:"invalid_json"}};
-    const res=await Promise.allSettled(ANA_PARTS.map(p=>run(p)));
-    const val=i=>res[i].status==="fulfilled"?res[i].value:{};
-    if(res[0].status!=="fulfilled")throw res[0].reason||{code:"invalid_json"};
-    const data={persons:{},age_overview:null,focus_areas:[],principles:[],guide:{},roles:[],...val(0),...val(1),...val(2)};
-    if(!data.persons||!Object.keys(data.persons).length)throw{code:"invalid_json"};
+    const res=await Promise.allSettled(keys.map(p=>run(p)));
+    const ci=keys.indexOf("child");
+    if(res[ci].status!=="fulfilled"||!data.persons.child)throw res[ci].reason||{code:"invalid_json"};
     const miss=res.filter(x=>x.status!=="fulfilled").length;
     S.analysis={basis:b,data,at:new Date().toISOString().slice(0,16).replace("T"," ")};save();analyzing=null;renderAll();
     toast(miss?"기질 분석을 작성했어요. 일부 항목은 기본 해석으로 보여요":"기질 분석을 작성했어요");
