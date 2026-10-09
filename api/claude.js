@@ -1,5 +1,6 @@
 // Vercel 서버 함수: 상담 화면의 AI 분석 요청을 Anthropic API로 전달합니다.
 // 필요한 환경변수: ANTHROPIC_API_KEY (필수), ACCESS_CODE (선택), ANTHROPIC_MODEL (선택)
+// json:true 요청이면 도구 입력 형식으로 받아 항상 올바른 JSON이 되게 합니다.
 // stream:true 요청이면 글자가 만들어지는 대로 보내서, 긴 분석도 끊기지 않게 합니다.
 const API = "https://api.anthropic.com/v1";
 const DEFAULT_MODEL = "claude-sonnet-4-5";
@@ -13,13 +14,15 @@ async function pickModel(key) {
   } catch (e) { return null; }
 }
 
-function callClaude(key, model, prompt, images, stream) {
+function callClaude(key, model, prompt, images, stream, json) {
   const content = (images || []).slice(0, 8).map(data => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } }));
   content.push({ type: "text", text: prompt });
   return fetch(`${API}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: 12000, stream: !!stream, messages: [{ role: "user", content }] })
+    body: JSON.stringify(Object.assign({ model, max_tokens: 12000, stream: !!stream, messages: [{ role: "user", content }] },
+      json ? { tools: [{ name: "answer", description: "요청한 JSON 형식 그대로 답을 제출합니다.", input_schema: { type: "object", additionalProperties: true } }],
+               tool_choice: { type: "tool", name: "answer" } } : {}))
   });
 }
 
@@ -31,16 +34,16 @@ module.exports = async (req, res) => {
   let sent = String(req.headers["x-access-code"] || "");
   try { sent = decodeURIComponent(sent); } catch (e) {}
   if (code && sent.trim() !== code.trim()) return res.status(401).json({ error: "access_code" });
-  const { prompt, images, stream } = req.body || {};
+  const { prompt, images, stream, json } = req.body || {};
   if (!prompt || typeof prompt !== "string" || prompt.length > 300000) return res.status(400).json({ error: "bad_request" });
   try {
     let model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
-    let r = await callClaude(key, model, prompt, images, stream);
+    let r = await callClaude(key, model, prompt, images, stream, json);
     if (r.status === 404 || r.status === 400) {
       const t = await r.text();
       if (/model/i.test(t)) {
         const alt = await pickModel(key);
-        if (alt && alt !== model) { model = alt; r = await callClaude(key, model, prompt, images, stream); }
+        if (alt && alt !== model) { model = alt; r = await callClaude(key, model, prompt, images, stream, json); }
         else return res.status(502).json({ error: "model", detail: t.slice(0, 300) });
       } else return res.status(502).json({ error: "upstream", detail: t.slice(0, 300) });
     }
@@ -49,7 +52,8 @@ module.exports = async (req, res) => {
 
     if (!stream) {
       const j = await r.json();
-      const text = (j.content || []).filter(c => c.type === "text").map(c => c.text).join("");
+      const tool = (j.content || []).find(c => c.type === "tool_use");
+      const text = tool ? JSON.stringify(tool.input) : (j.content || []).filter(c => c.type === "text").map(c => c.text).join("");
       return res.status(200).json({ text, model, truncated: j.stop_reason === "max_tokens" });
     }
 
@@ -69,7 +73,8 @@ module.exports = async (req, res) => {
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
         if (!line.startsWith("data:")) continue;
         let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
-        if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") res.write(ev.delta.text);
+        if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") { if (!json) res.write(ev.delta.text); }
+        else if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "input_json_delta") res.write(ev.delta.partial_json || "");
         else if (ev.type === "message_delta" && ev.delta) stop = ev.delta.stop_reason || stop;
         else if (ev.type === "error") err = (ev.error && (ev.error.type + ": " + ev.error.message)) || "stream error";
       }
