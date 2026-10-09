@@ -703,17 +703,21 @@ function serverSample(){
   const setCode=c=>{try{localStorage.setItem("tc-access-code",c)}catch(e){}};
   const toJpeg=async blob=>{const bm=await createImageBitmap(blob);const k=Math.min(1,1100/bm.width);const cv=document.createElement("canvas");cv.width=Math.round(bm.width*k);cv.height=Math.round(bm.height*k);
     const c=cv.getContext("2d");c.fillStyle="#fff";c.fillRect(0,0,cv.width,cv.height);c.drawImage(bm,0,0,cv.width,cv.height);return cv.toDataURL("image/jpeg",.85).split(",")[1]};
-  const parse=t=>{try{return JSON.parse(t)}catch(e){}const m=t.match(/```(?:json)?\s*([\s\S]*?)```/);if(m){try{return JSON.parse(m[1])}catch(e){}}
+  const repair=t=>{let o="",q=false;for(let i=0;i<t.length;i++){const c=t[i];
+      if(q){if(c==="\\"){o+=c+(t[i+1]||"");i++;continue}
+        if(c==="\""){const rest=t.slice(i+1).match(/^\s*(.)/);if(!rest||/[,}\]:]/.test(rest[1])){q=false;o+=c}else o+='\\"';continue}
+        if(c==="\n"){o+="\\n";continue}o+=c}else{if(c==="\"")q=true;o+=c}}return o};
+  const parse=t=>{try{return JSON.parse(t)}catch(e){}try{const i=t.search(/[\[{]/),j=Math.max(t.lastIndexOf("}"),t.lastIndexOf("]"));if(i>=0&&j>i)return JSON.parse(repair(t.slice(i,j+1)))}catch(e){}const m=t.match(/```(?:json)?\s*([\s\S]*?)```/);if(m){try{return JSON.parse(m[1])}catch(e){}}
     const i=t.search(/[\[{]/),j=Math.max(t.lastIndexOf("}"),t.lastIndexOf("]"));if(i>=0&&j>i){try{return JSON.parse(t.slice(i,j+1))}catch(e){}}throw{code:"invalid_json",text:t}};
   const call=async(prompt,opts={})=>{
     const images=opts.images?await Promise.all([].concat(opts.images).slice(0,8).map(toJpeg)):[];
     for(let attempt=0;attempt<4;attempt++){
-      let r;try{r=await fetch("/api/claude",{method:"POST",signal:opts.signal,headers:{"content-type":"application/json","x-access-code":encodeURIComponent(getCode())},body:JSON.stringify({prompt,images,stream:true})})}
+      let r;try{r=await fetch("/api/claude",{method:"POST",signal:opts.signal,headers:{"content-type":"application/json","x-access-code":encodeURIComponent(getCode())},body:JSON.stringify({prompt,images,stream:true,json:!!opts.json})})}
       catch(e){throw{code:e&&e.name==="AbortError"?"cancelled":"upstream_error"}}
       if(r.status===401){if(attempt===3)break;const c=window.prompt(attempt===0&&!getCode()?"AI 분석 접근 코드를 입력해 주세요":"접근 코드가 맞지 않아요. Vercel의 ACCESS_CODE 값과 똑같이 다시 입력해 주세요 (대소문자 구분)");if(!c)throw{code:"not_granted"};setCode(c.trim());continue}
       if(r.status===503||r.status===404)throw{code:"sampling_disabled"};
       if(r.status===429)throw{code:"rate_limited"};
-      if(!r.ok){let d="";try{const j=await r.json();d=[j.error,j.detail].filter(Boolean).join(": ")}catch(e){}throw{code:"upstream_error",detail:d.slice(0,160)}}
+      if(!r.ok){let d="",raw="";try{raw=await r.text();const j=JSON.parse(raw);d=[j.error,j.detail].filter(Boolean).join(": ")}catch(e){d=`HTTP ${r.status}${/TIMEOUT/i.test(raw)?" 시간 초과":""} ${raw.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim()}`}throw{code:"upstream_error",detail:d.slice(0,160)}}
       if(!(r.headers.get("content-type")||"").includes("text/plain"))return await r.json();
       const rd=r.body.getReader(),dec=new TextDecoder();let text="";
       try{for(;;){const {done,value}=await rd.read();if(done)break;text+=dec.decode(value,{stream:true});
@@ -727,7 +731,7 @@ function serverSample(){
     setCode("");throw{code:"bad_code"};
   };
   const fn=async(prompt,opts={})=>{const j=await call(prompt,opts);return{text:j.text,truncated:!!j.truncated}};
-  fn.json=async(prompt,opts={})=>{const j=await call(prompt,opts);if(j.truncated)throw{code:"invalid_json"};return parse(j.text||"")};
+  fn.json=async(prompt,opts={})=>{const j=await call(prompt,{...opts,json:true});if(j.truncated)throw{code:"invalid_json",detail:"답이 너무 길어 잘렸어요"};return parse(j.text||"")};
   fn.limits=async()=>({maxPromptBytes:262144,images:{maxCount:8}});
   return fn;
 }
@@ -935,9 +939,9 @@ const anaPart=()=>{const c=cName(),bl=bandLabel()||"연령",pa=parents(),pn=pa.m
  child:H+`{"persons":{"child":${PJ}},
  "age_overview":{"title":"${bl} 발달 특성과 ${c}의 기질","points":[{"dev":"연령 발달 특성 1문장","link":"이 아이 기질과 연결한 의미와 대처 1~2문장"}]}}
 - keywords는 두드러진 요인에서만. age_overview.points 3~4개.`,
- focus:H+`{"focus_areas":[{"title":"지도 영역 이름","priority":"높음|보통","factors":["관련 요인"],"basis":"근거: 두드러진 요인 점수와 연령 특성 1~2문장","concern":"예상되는 모습 1~2문장","goal":"지도 목표 1문장","home":["가정에서 할 일 2~3개"],"center":["기관에서 할 일 1~2개"],"check":"2~4주 뒤 확인할 변화 1문장"}]}
+ focus:H+`{"focus_areas":[{"title":"지도 영역 이름","priority":"높음|보통","factors":["관련 요인"],"basis":"근거: 두드러진 요인 점수와 연령 특성 1~2문장","concern":"예상되는 모습 1~2문장","goal":"지도 목표 1문장","home":["부모가 아이에게 해 줄 일 3~4개: 언제(어떤 상황)·어떻게·얼마나(시간·횟수)와 실제로 할 말을 작은따옴표로"],"check":"2~4주 뒤 확인할 변화 1문장"}]}
 - focus_areas 1~3개(우선순위 순).`,
- prin:H+`{"principles":[{"title":"아이 양육 원칙 한 줄","factors":["관련 요인"],"how":["구체적 행동 2개"]}],
+ prin:H+`{"principles":[{"title":"아이 양육 원칙 한 줄","factors":["관련 요인"],"how":["부모가 할 구체적 행동 2개(언제·어떻게, 할 말 포함)"]}],
  "roles":[{"factor":"요인 이름","empathy":"공감 담당이 할 일 1문장","expand":"넓혀 주기 담당이 할 일 1문장"}]}
 - principles 3~4개. roles는 '역할나누기_대상'의 요인만(없으면 빈 배열).`};
  if(pa.length){
@@ -964,7 +968,8 @@ function analysisPrompt(part){
 - 점수·차이는 데이터 값만 쓰고 직접 다시 계산하지 마세요. 진단·장애·치료를 암시하는 표현은 절대 쓰지 마세요.
 - 두드러진 요인들의 '조합'이 해당 연령의 일상(등원·낮잠·식사·놀이터·기관·또래 놀이)에서 어떻게 나타나는지 구체적 장면으로 쓰세요.
 - 양육 방법은 막연한 표현('관심을 가져 주세요', '이해해 주세요', '함께 읽어 보세요')을 쓰지 말고, 언제·어디서·어떻게·얼마나(시간·횟수)를 넣은 행동으로 쓰고 실제로 할 말을 작은따옴표로 넣으세요.
-- '지도가 필요한 부분'은 연령 발달 과업과 아이 기질이 겹쳐 어려움이 생길 수 있는 영역을 종합 분석해 우선순위를 정하세요. 각 영역마다 근거(두드러진 요인과 점수 + 연령 특성), 예상되는 모습, 지도 목표, 가정에서 할 일, 기관에서 할 일, 2~4주 뒤 확인할 변화를 쓰세요. 해당 사항이 적으면 1~2개만 써도 됩니다.
+- 양육 방법은 부모(엄마·아빠)가 가정에서 아이에게 직접 해 줄 일만 쓰세요. 기관·교사가 할 일은 쓰지 마세요.
+- '지도가 필요한 부분'은 연령 발달 과업과 아이 기질이 겹쳐 어려움이 생길 수 있는 영역을 종합 분석해 우선순위를 정하세요. 각 영역마다 근거(두드러진 요인과 점수 + 연령 특성), 예상되는 모습, 지도 목표, 부모가 아이에게 해 줄 일, 2~4주 뒤 확인할 변화를 쓰세요. 해당 사항이 적으면 1~2개만 써도 됩니다.
 - 쉬운 우리말 '~해요'체. 전문 용어는 바로 풀이. 기질에는 좋고 나쁨이 없다는 관점, 부모를 탓하지 않기.
 - 성별은 연구로 확인된 평균적 경향이 실제로 관련 있을 때만 조심스럽게 참고하고, 고정관념 표현(남자아이니까 등)은 쓰지 마세요. 관련 없으면 언급하지 마세요.
 - 아이 이름은 '${cName()}', 양육자는 '엄마'·'아빠'.
@@ -997,7 +1002,7 @@ async function analyzeNow(){
     const miss=res.filter(x=>x.status!=="fulfilled").length;
     S.analysis={basis:b,data,at:new Date().toISOString().slice(0,16).replace("T"," ")};save();analyzing=null;renderAll();
     toast(miss?"기질 분석을 작성했어요. 일부 항목은 기본 해석으로 보여요":"기질 분석을 작성했어요");
-  }catch(e){analyzing=null;renderAnaBar();st().forEach(s=>s.textContent=e.code==="not_granted"?"분석 작성이 허용되지 않았어요.":e.code==="rate_limited"?"요청이 많아요. 잠시 후 다시 눌러 주세요.":e.code==="upstream_error"&&e.detail?`작성하지 못했어요 (${e.detail}). 다시 눌러 주세요.`:"작성하지 못했어요. 다시 눌러 주세요.")}
+  }catch(e){analyzing=null;renderAnaBar();st().forEach(s=>s.textContent=e.code==="not_granted"?"분석 작성이 허용되지 않았어요.":e.code==="rate_limited"?"요청이 많아요. 잠시 후 다시 눌러 주세요.":e.detail?`작성하지 못했어요 (${e.detail}). 다시 눌러 주세요.`:e.code==="invalid_json"?"작성하지 못했어요 (AI 답 형식 오류). 다시 눌러 주세요.":`작성하지 못했어요${e&&e.code?` (${e.code})`:""}. 다시 눌러 주세요.`)}
 }
 let EDIT=false;
 function setPath(obj,path,v){const ks=path.split(".");let o=obj;for(let i=0;i<ks.length-1;i++){o=o[ks[i]];if(o==null)return}o[ks[ks.length-1]]=v}
@@ -1142,8 +1147,7 @@ function renderFocus(){
       <div class="basis" ${E("basis")}>${esc(f.basis||"")}</div>
       <div ${E("concern")}>${esc(f.concern||"")}</div>
       <div class="goal">목표 · <span ${E("goal")}>${esc(f.goal||"")}</span></div>
-      <div class="cols"><div><div class="k">가정에서</div><ul class="steps">${(f.home||[]).map((h,i)=>`<li ${b?`data-edit="${b}.home.${i}"`:""}>${esc(h)}</li>`).join("")}</ul></div>
-        <div><div class="k">기관에서</div><ul class="steps">${(f.center||[]).map((h,i)=>`<li ${b?`data-edit="${b}.center.${i}"`:""}>${esc(h)}</li>`).join("")}</ul></div></div>
+      <div class="cols"><div><div class="k">부모가 아이에게 해 줄 일</div><ul class="steps">${(f.home||[]).map((h,i)=>`<li ${b?`data-edit="${b}.home.${i}"`:""}>${esc(h)}</li>`).join("")}</ul></div></div>
       ${f.check?`<div class="check">확인할 변화 · <span ${E("check")}>${esc(f.check)}</span></div>`:""}
       <div>${(f.home||[])[0]?addBtn(f.home[0],"지도·"+f.title):""}</div></div>`}).join("")
     :`<p class="small muted">${cName()}의 기질 결과에서 연령 발달과 겹쳐 특별히 지도가 필요한 영역은 두드러지지 않아요. 아래 양육 방법을 일관되게 이어가 주세요.</p>`;
@@ -1224,7 +1228,7 @@ function handoutHTML(){
   const fa=focusItems();
   if(fa.length){blocks.push(B(`<h2>${esc(c)}에게 지도가 필요한 부분</h2>`));fa.forEach(f=>blocks.push(B(`<div class="fa2"><div class="t"><span>${esc(f.title)}</span><span class="m">우선순위 ${esc(f.priority||"보통")}</span></div>
     <div class="m">${esc(f.basis||"")}</div><div>${esc(f.concern||"")}</div><div><b>목표</b> ${esc(f.goal||"")}</div>
-    <div class="two"><div><b>가정에서</b><ul>${(f.home||[]).map(h=>`<li>${esc(h)}</li>`).join("")}</ul></div><div><b>기관에서</b><ul>${(f.center||[]).map(h=>`<li>${esc(h)}</li>`).join("")}</ul></div></div>
+    <div><b>부모가 아이에게 해 줄 일</b><ul>${(f.home||[]).map(h=>`<li>${esc(h)}</li>`).join("")}</ul></div>
     ${f.check?`<div class="m" style="margin-top:4px"><b>확인할 변화</b> ${esc(f.check)}</div>`:""}</div>`)))}
   pa.forEach(p=>{const items=cmpAll(p).filter(x=>x.big);if(!items.length)return;
     blocks.push(B(`<h2>${R[p].n}는 이렇게 해 주세요</h2>`));
@@ -1281,7 +1285,7 @@ function sumText(){
   L.push("","■ 기질 점수 ("+on().map(nameOf).join(" / ")+")");
   F().forEach(d=>L.push(`  - ${d.n}: ${on().map(p=>val(p,d.id)!=null?`${val(p,d.id)}${notable(p,d.id)?"*":""}`:"없음").join(" / ")}`));L.push(`  (* 중간값 ${S.crit.med}에서 표준편차 ${S.crit.sd} 이상 벗어난 요인)`);
   parents().forEach(p=>{L.push("",`■ ${c}${ko(c,"과","와")} ${R[p].n} — 점수 차이가 큰 요인`);cmpAll(p).filter(x=>x.big).forEach(x=>L.push(`  - [${gapWord(x)}] ${x.d.n}: ${x.c??""} / ${x.v??""}${x.gap!=null?` (차이 ${x.gap})`:""}`))});
-  const fa=focusItems();if(fa.length){L.push("","■ 지도가 필요한 부분");fa.forEach(f=>{L.push(`  · ${f.title} (${f.priority||"보통"}) - ${f.goal||""}`);(f.home||[]).forEach(h=>L.push(`     가정: ${h}`))})}
+  const fa=focusItems();if(fa.length){L.push("","■ 지도가 필요한 부분");fa.forEach(f=>{L.push(`  · ${f.title} (${f.priority||"보통"}) - ${f.goal||""}`);(f.home||[]).forEach(h=>L.push(`     부모: ${h}`))})}
   if(S.acts.length){L.push("","■ 함께 정한 실천");S.acts.forEach((x,i)=>L.push(`  ${i+1}. ${x.t}`))}
   if(S.notes.trim())L.push("","■ 상담 메모",S.notes.trim());
   return L.join("\n");
