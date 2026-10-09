@@ -982,7 +982,7 @@ ${JSON.stringify(data,null,1)}`;
 let analyzing=null;
 var autoT=null,autoFail=null;
 function scheduleAuto(){clearTimeout(autoT);
-  if(!sampleFn||analyzing||S.sample||A())return;
+  if(!sampleFn||analyzing||S.sample||A()||!S.info.sex||!S.info.band)return;
   if(!Object.keys((S.P.child&&S.P.child.f)||{}).length||(S.pending||[]).length)return;
   const b=basis();if(autoFail===b)return;
   autoT=setTimeout(()=>{if(!analyzing&&!A()&&basis()===b)analyzeNow(true)},2000)}
@@ -1018,7 +1018,7 @@ function renderAnaBar(){
   if(analyzing)return;
   const a=A(),stale=S.analysis&&!a,can=!!sampleFn,has=on().some(p=>Object.keys(S.P[p].f).length);
   const html=`<div class="anabar"><div style="min-width:0"><b>${a?"기질검사 결과를 바탕으로 작성한 분석이에요":stale?"점수·기준·연령·성별이 바뀌었어요":"기본 해석을 보여 주고 있어요"}</b>
-     <div class="note anaStatus">${a?`작성 ${S.analysis.at||""} · ${bandLabel()||"연령 미입력"}${S.info.sex?` · ${S.info.sex}아`:""} 기준. ‘문장 고치기’로 직접 다듬을 수 있어요.`:can&&autoFail===basis()?"자동 작성이 되지 않았어요. ‘다시 작성’을 눌러 주세요.":stale?"바뀐 내용으로 분석을 곧 자동으로 다시 작성해요.":can?"결과지 점수가 정리되면 연령 발달 특성을 반영한 분석과 구체적인 양육 방법을 자동으로 작성해요. 성별·연령을 바꾸면 다시 작성돼요.":"이 화면에서는 분석 작성을 쓸 수 없어 기본 해석을 보여 줘요."}</div></div>
+     <div class="note anaStatus">${a?`작성 ${S.analysis.at||""} · ${bandLabel()||"연령 미입력"}${S.info.sex?` · ${S.info.sex}아`:""} 기준. ‘문장 고치기’로 직접 다듬을 수 있어요.`:can&&autoFail===basis()?"자동 작성이 되지 않았어요. ‘다시 작성’을 눌러 주세요.":can&&(!S.info.sex||!S.info.band)?"1번 탭 상담 정보에서 성별과 연령을 입력하면 분석을 자동으로 작성해요.":stale?"바뀐 내용으로 분석을 곧 자동으로 다시 작성해요.":can?"결과지 점수가 정리되면 연령 발달 특성을 반영한 분석과 구체적인 양육 방법을 자동으로 작성해요. 성별·연령을 바꾸면 다시 작성돼요.":"이 화면에서는 분석 작성을 쓸 수 없어 기본 해석을 보여 줘요."}</div></div>
      <div class="btn-row">${can?`<button class="btn ${a?"":"primary"}" data-analyze ${has?"":"disabled"}>${a||autoFail===basis()?"다시 작성":"지금 작성"}</button>`:""}${a?`<button class="btn ghost" data-editmode>${EDIT?"고치기 끝":"문장 고치기"}</button>`:""}</div></div>`;
   document.querySelectorAll(".anaSlot").forEach(s=>s.innerHTML=html);
   document.querySelectorAll("[data-analyze]").forEach(b=>b.onclick=()=>{autoFail=null;analyzeNow()});
