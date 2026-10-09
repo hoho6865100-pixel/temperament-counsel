@@ -705,16 +705,16 @@ function serverSample(){
     const i=t.search(/[\[{]/),j=Math.max(t.lastIndexOf("}"),t.lastIndexOf("]"));if(i>=0&&j>i){try{return JSON.parse(t.slice(i,j+1))}catch(e){}}throw{code:"invalid_json",text:t}};
   const call=async(prompt,opts={})=>{
     const images=opts.images?await Promise.all([].concat(opts.images).slice(0,8).map(toJpeg)):[];
-    for(let attempt=0;attempt<2;attempt++){
-      let r;try{r=await fetch("/api/claude",{method:"POST",signal:opts.signal,headers:{"content-type":"application/json","x-access-code":getCode()},body:JSON.stringify({prompt,images})})}
+    for(let attempt=0;attempt<4;attempt++){
+      let r;try{r=await fetch("/api/claude",{method:"POST",signal:opts.signal,headers:{"content-type":"application/json","x-access-code":encodeURIComponent(getCode())},body:JSON.stringify({prompt,images})})}
       catch(e){throw{code:e&&e.name==="AbortError"?"cancelled":"upstream_error"}}
-      if(r.status===401){const c=window.prompt("AI 분석 접근 코드를 입력해 주세요");if(!c)throw{code:"not_granted"};setCode(c.trim());continue}
+      if(r.status===401){if(attempt===3)break;const c=window.prompt(attempt===0&&!getCode()?"AI 분석 접근 코드를 입력해 주세요":"접근 코드가 맞지 않아요. Vercel의 ACCESS_CODE 값과 똑같이 다시 입력해 주세요 (대소문자 구분)");if(!c)throw{code:"not_granted"};setCode(c.trim());continue}
       if(r.status===503||r.status===404)throw{code:"sampling_disabled"};
       if(r.status===429)throw{code:"rate_limited"};
-      if(!r.ok)throw{code:"upstream_error"};
+      if(!r.ok){let d="";try{const j=await r.json();d=[j.error,j.detail].filter(Boolean).join(": ")}catch(e){}throw{code:"upstream_error",detail:d.slice(0,160)}}
       return await r.json();
     }
-    throw{code:"not_granted"};
+    setCode("");throw{code:"bad_code"};
   };
   const fn=async(prompt,opts)=>{const j=await call(prompt,opts);if(opts&&opts.onText)opts.onText({text:j.text,delta:j.text});return{text:j.text,truncated:!!j.truncated}};
   fn.json=async(prompt,opts)=>{const j=await call(prompt,opts);return parse(j.text||"")};
@@ -853,9 +853,11 @@ async function processFile(file){
       st.textContent="결과지 분석 중";
       const ask=imgs=>sampleFn.json(PROMPT+r.text+'\n"""',imgs.length?{images:imgs,modelTier:"complex"}:{modelTier:"complex"});
       try{res=await ask(r.imgs)}catch(e){
-        if(e.code==="not_granted"||e.code==="sampling_disabled"){sampleFn=null;res=localParse(r.text)}
+        if(e.code==="bad_code")throw new Error("접근 코드가 맞지 않아 AI 분석을 하지 못했어요. 결과지를 다시 올리고 코드를 정확히 입력해 주세요.");
+        if(e.code==="sampling_disabled")throw new Error("AI 서버에 API 키가 설정되지 않았어요. Vercel 환경변수 ANTHROPIC_API_KEY를 확인해 주세요.");
+        if(e.code==="not_granted"){res=localParse(r.text);res.warnings=["접근 코드를 입력하지 않아 AI 없이 그래프만 읽었어요."].concat(res.warnings||[])}
         else if(e.code==="images_unavailable"||e.code==="image_rejected"){res=await ask([])}
-        else throw new Error(e.code==="rate_limited"?"요청이 많아요. 잠시 후 다시 올려 주세요":e.code==="invalid_json"?"결과를 읽지 못했어요. 다시 올려 주세요":"분석하지 못했어요. 다시 올려 주세요");
+        else throw new Error(e.code==="upstream_error"?"AI 서버에서 오류가 났어요. API 키가 올바른지, Anthropic 계정에 크레딧이 있는지 확인해 주세요."+(e.detail?" ("+e.detail+")":""):e.code==="rate_limited"?"요청이 많아요. 잠시 후 다시 올려 주세요":e.code==="invalid_json"?"결과를 읽지 못했어요. 다시 올려 주세요":"분석하지 못했어요. 다시 올려 주세요");
       }
     }else res=localParse(r.text);
     /* 결과지 3쪽 막대그래프에서 점수를 직접 읽어 정확도를 높임 */
@@ -866,7 +868,7 @@ async function processFile(file){
         people:bars.colors.map((c,ci)=>({role:ci===0?"child":"unknown",
           role_evidence:ci===0?"결과지 3쪽 막대그래프의 첫 번째(아이) 막대":`결과지 3쪽 막대그래프의 ${ci+1}번째 막대 — 범례에서 엄마인지 아빠인지 확인해 주세요`,
           factors:Object.fromEntries(LIB.map((l,gi)=>[l.n,{score:bars.groups[gi][c],level:null,original:`3쪽 그래프에서 읽음 ${bars.groups[gi][c]}`}])),sheet_interpretation:[]})),
-        warnings:["결과지 3쪽 막대그래프에서 점수를 읽었어요. 결과지 숫자와 대조해 주세요."]};
+        warnings:(res.warnings||[]).filter(w=>/AI|코드/.test(w)).concat(res._local?[]:["AI가 결과지에서 점수를 찾지 못했어요."],["결과지 3쪽 막대그래프에서 점수를 읽었어요. 결과지 숫자와 대조해 주세요."])};
     }else if(barsOk){
       let next=1;aiPeople.forEach(pp=>{const ci=normRole(pp.role)==="child"?0:next++;const c=bars.colors[ci];if(!c)return;
         LIB.forEach((l,gi)=>{const key=Object.keys(pp.factors).find(k=>norm(k)===norm(l.n));if(key&&pp.factors[key]){pp.factors[key].score=bars.groups[gi][c];pp.factors[key].original=(pp.factors[key].original||l.n)+" · 3쪽 그래프로 확인"}})});
