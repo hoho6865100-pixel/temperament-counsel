@@ -247,8 +247,9 @@ ul.steps li::before{content:"→";position:absolute;left:0;color:var(--muted)}
 .gapcol span{white-space:nowrap}
 .gap{font-weight:700;padding:0 7px;border-radius:999px}
 .gap.same{background:var(--same-soft);color:var(--same)} .gap.diff{background:var(--diff-soft);color:var(--diff)} .gap.big{background:var(--diff);color:var(--surface)}
-.lmap .lrow{grid-template-columns:7.5em repeat(3,minmax(0,1fr)) 7.5em}
-@media (max-width:620px){.lmap .lrow{grid-template-columns:4.6em repeat(3,minmax(0,1fr));}.lmap .gapcol{grid-column:2/-1;flex-direction:row;flex-wrap:wrap;gap:4px 10px}.lmap .lrow.head .gh{display:none}}
+.lmap .lrow{grid-template-columns:9.5em repeat(3,minmax(0,1fr))}
+.kw{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}.kw span{font-size:.7rem;font-weight:500;color:var(--muted);background:var(--sunk);border-radius:999px;padding:1px 7px;line-height:1.5}
+@media (max-width:620px){.lmap .lrow{grid-template-columns:5.8em repeat(3,minmax(0,1fr));}.kw span{font-size:.62rem;padding:0 5px}}
 .focus{display:flex;flex-direction:column;gap:14px}
 .fa{border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;background:var(--surface)}
 .fa .top{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
@@ -433,6 +434,7 @@ ul.steps li::before{content:"→";position:absolute;left:0;color:var(--muted)}
 
 <script>
 /* K-NYLS 8개 기질 요인 (결과지 순서 그대로). 접근-회피는 높을수록 회피적 */
+const KW={emo:["정서 민감","공감","감정 표현"],sens:["감각 민감","자극 반응"],int:["감정 강도","표현 에너지"],adp:["유연성","변화 수용"],wd:["새로움 탐색","신중함","조심성"],act:["활동 에너지","자극 추구"],att:["끈기","집중 지속"],reg:["생활 리듬","예측 가능성"]};
 const LIB=[
  {k:"emo",n:"정서성",al:["정서성"],lo:"감정이 담담함",hi:"감정이 풍부함",dLo:"감정에 크게 흔들리지 않아 스트레스를 덜 받는 편이에요",dHi:"감정을 풍부하게 표현하고 다른 사람의 감정도 잘 알아차려요",
   tHi:"감정이 풍부한 만큼 기분 변화도 커요. '지금 어떤 기분이야?' 하고 감정을 말로 정리하도록 도와주세요.",tLo:"속마음이 겉으로 잘 드러나지 않아요. 표정 변화가 작아도 '속상했어?' 하고 먼저 물어봐 주세요."},
@@ -1057,15 +1059,15 @@ function renderPortraits(){
 }
 function levelMap(){
   const ps=on(),pa=parents();
-  $("map8").innerHTML=`<div class="lrow head"><div></div><div>중간값 아래 (${S.crit.low} 이하)</div><div>중간값 부근</div><div>중간값 위 (${S.crit.high} 이상)</div><div class="gh">아이와 점수 차이</div></div>`+F().map(d=>{
+  $("map8").innerHTML=`<div class="lrow head"><div></div><div>중간값 아래 (${S.crit.low} 이하)</div><div>중간값 부근</div><div>중간값 위 (${S.crit.high} 이상)</div></div>`+F().map(d=>{
     const L=libOf(d);
     const cell=l=>{const who=ps.filter(p=>lv(p,d.id)===l);
       return `<div class="lcell ${l==="mid"?"mid":""}"><span class="end">${L&&l!=="mid"?L[l]:""}</span><div class="who-dots">${who.map(p=>`<span class="pp ${p}" title="${esc(S.P[p].f[d.id]?.orig||"")}">${esc(nameOf(p))} ${val(p,d.id)??""}</span>`).join("")}</div></div>`};
     const miss=ps.filter(p=>val(p,d.id)==null);
-    const gaps=pa.map(p=>{const x=cmpF(p,d);return x?`<span>${R[p].n} <b class="gap ${gapCls(x)}">${x.gap}</b></span>`:""}).join("");
-    return `<div class="lrow"><div class="lname">${esc(d.n)}${miss.length?`<div class="note" style="font-weight:400">${miss.map(nameOf).join("·")} 결과 없음</div>`:""}</div>${cell("lo")}${cell("mid")}${cell("hi")}<div class="gapcol">${gaps}</div></div>`}).join("");
+    const kw=L&&KW[L.k];
+    return `<div class="lrow"><div class="lname">${esc(d.n)}${kw?`<div class="kw">${kw.map(w=>`<span>${esc(w)}</span>`).join("")}</div>`:""}${miss.length?`<div class="note" style="font-weight:400">${miss.map(nameOf).join("·")} 결과 없음</div>`:""}</div>${cell("lo")}${cell("mid")}${cell("hi")}</div>`}).join("");
   $("legend8").innerHTML=ps.map(p=>`<span class="pp ${p}">${esc(nameOf(p))}</span>`).join("");
-  $("mapNote").innerHTML=`양쪽 칸은 중간값에서 표준편차(${S.crit.sd}) 이상 벗어난 두드러진 요인이에요. 아이와 점수 차이: <span class="gap same">${S.crit.big} 미만</span> <span class="gap big">${S.crit.big} 이상 · 해석 대상</span>`;
+  $("mapNote").innerHTML=`양쪽 칸은 중간값에서 표준편차(${S.crit.sd}) 이상 벗어난 두드러진 요인이에요. 요인 이름 아래 낱말은 그 요인이 보여 주는 기질의 모습이에요.`;
 }
 function vennData(p){
   const same=[],cOnly=[],pOnly=[],lines=[];
