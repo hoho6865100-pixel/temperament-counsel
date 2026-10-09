@@ -313,13 +313,13 @@ ul.steps li::before{content:"→";position:absolute;left:0;color:var(--muted)}
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="input" aria-selected="false"><span class="step">1</span>결과지 정리</button>
-    <button role="tab" data-tab="view" aria-selected="true"><span class="step">2</span>결과 함께 보기</button>
+    <button role="tab" data-tab="input" aria-selected="true"><span class="step">1</span>결과지 정리</button>
+    <button role="tab" data-tab="view" aria-selected="false"><span class="step">2</span>결과 함께 보기</button>
     <button role="tab" data-tab="wrap" aria-selected="false"><span class="step">3</span>양육 방법 정리</button>
   </nav>
 
   <!-- ============ 1. 결과지 정리 ============ -->
-  <section class="panel" id="tab-input" hidden>
+  <section class="panel" id="tab-input">
     <div class="card">
       <div class="sec-head"><h2>검사 결과지 PDF</h2><span class="note">아이·엄마·아빠 결과지를 여러 개 함께 올릴 수 있어요</span></div>
       <label class="drop" id="drop" for="pdfInput">
@@ -364,7 +364,7 @@ ul.steps li::before{content:"→";position:absolute;left:0;color:var(--muted)}
   </section>
 
   <!-- ============ 2. 결과 함께 보기 ============ -->
-  <section class="panel" id="tab-view">
+  <section class="panel" id="tab-view" hidden>
     <div class="banner" id="unverified" hidden></div>
     <div class="card" id="sheetFigCard">
       <div class="sec-head"><h2>결과지 기질 프로파일</h2><span class="note">결과지 원본 그림</span></div>
@@ -1391,7 +1391,7 @@ SAMPLE_ANALYSIS.focus_areas=[
 if(!S||!S.factors)loadSampleState();
 ensureCrit();
 renderCrit();renderPending();renderPeople();renderInfo();renderGList();$("notes").value=S.notes||"";renderAll();
-try{const t=localStorage.getItem(KEY+"-tab");if(t)setTab(t)}catch(e){}
+setTab("input");
 </script>
 
 </body>
